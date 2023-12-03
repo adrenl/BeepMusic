@@ -34,9 +34,16 @@ namespace BeepMusic
         private static int _nowNote = 0;
         public static int NowNote { get { return _nowNote; } }
 
-        public static event NotePlayHandler NotePlayEvent;
+        private static bool _isAnalysed = false;
+        public static bool IsAnalysed { get { return _isAnalysed; } }
 
-        public delegate void NotePlayHandler(object sender, Note e);
+        public static event NotePlayHandler? NotePlayEvent;
+
+        public delegate void NotePlayHandler(Note e);        
+        
+        public static event PlayCompleteHandler? PlayCompleteEvent;
+
+        public delegate void PlayCompleteHandler();
 
         private static BackgroundWorker worker = new BackgroundWorker() { WorkerSupportsCancellation = true };
 
@@ -45,55 +52,83 @@ namespace BeepMusic
             worker.DoWork += Worker_DoWork;
         }
 
-        public static void Analyse(string musicScoreText)
+        public static bool Analyse(string musicScoreText)
         {
             Stop();
-            string[] musicScore = musicScoreText.Split('|');
-            Note[] notes = new Note[musicScore.Length];
-            for(int i = 0;i < musicScore.Length;i++)
+            try
             {
-                string[] note = musicScore[i].Split(',');
-                notes[i].Frequency = int.Parse(note[0]);
-                notes[i].Duration = int.Parse(note[1]);
+                string[] musicScore = musicScoreText.Split('|');
+                Note[] notes = new Note[musicScore.Length];
+                for (int i = 0; i < musicScore.Length; i++)
+                {
+                    string[] note = musicScore[i].Split(',');
+                    notes[i].Frequency = int.Parse(note[0]);
+                    notes[i].Duration = int.Parse(note[1]);
+                }
+                Score = notes;
+                _status = BeepPlayerStatus.Stop;
+                _isAnalysed = true;
+                return true;
+            } catch {
+                _isAnalysed = false;
+                return false;
             }
-            Score = notes;
-            _status = BeepPlayerStatus.Stop;
-        }        
-        
+        }
+
         public static void Clear()
         {
             Stop();
             Score = new Note[0];
             _status = BeepPlayerStatus.NoAnalyse;
+            _isAnalysed = false;
         }
 
-        public static void Play()
+        public static bool Play()
         {
             if (_status == BeepPlayerStatus.NoAnalyse)
-                return;
+                return false;
             _status = BeepPlayerStatus.Play;
             worker.RunWorkerAsync();
+            return true;
         }        
         
-        public static void Pause()
+        public static bool Pause()
         {
-            _status = BeepPlayerStatus.Pause;
-            worker.CancelAsync();
+            if (IsAnalysed)
+            {
+                _status = BeepPlayerStatus.Pause;
+                worker.CancelAsync();
+                return true;
+            }
+            else
+                return false;
         }        
         
-        public static void PlayPause()
+        public static bool PlayPause()
         {
-            if (_status == BeepPlayerStatus.Pause || _status == BeepPlayerStatus.Stop)
-                Play();
-            else if (_status == BeepPlayerStatus.Play)
-                Pause();
+            if (IsAnalysed)
+            {
+                if (_status == BeepPlayerStatus.Pause || _status == BeepPlayerStatus.Stop)
+                    Play();
+                else if (_status == BeepPlayerStatus.Play)
+                    Pause();
+                return true;
+            }
+            else
+                return false;
         }
 
-        public static void Stop()
+        public static bool Stop()
         {
-            _status = BeepPlayerStatus.Stop;
-            worker.CancelAsync();
-            _nowNote = 0;
+            if (IsAnalysed)
+            {
+                _status = BeepPlayerStatus.Stop;
+                worker.CancelAsync();
+                _nowNote = 0;
+                return true;
+            }
+            else
+                return false;
         }
 
         private static void Worker_DoWork(object? sender, DoWorkEventArgs e)
@@ -103,7 +138,7 @@ namespace BeepMusic
             do
             {
                 var note = Score[_nowNote];
-                NotePlayEvent(new object(), note);
+                NotePlayEvent(note);
                 if (note.Frequency >= 37 && note.Frequency <= 32767)
                 {
                     Console.Beep(note.Frequency, note.Duration);
@@ -113,9 +148,13 @@ namespace BeepMusic
                     Thread.Sleep(note.Duration);
                 }
                 _nowNote++;
+                if (_nowNote == TotalNote)
+                {
+                    Stop();
+                    PlayCompleteEvent();
+                }
             } while(worker.CancellationPending == false);
             e.Cancel = true;
-            Stop();
         }
     }
 }
